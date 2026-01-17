@@ -1,0 +1,33 @@
+python -m venv jobvenv
+jobvenv\Scripts\activate
+pip install --upgrade pip setuptools wheel
+pip install python-docx rapidfuzz PyMuPDF spacy
+python -m spacy download en_core_web_sm
+# optional (better): python -m spacy download en_core_web_lg
+
+pip install huggingface_hub[hf_xet] or pip install hf_xet
+
+# Transformers & NER (optional but recommended)
+pip install transformers[torch]   # big, installs PyTorch (choose torch with CUDA for GPU)
+# OR install CPU-only torch following official instructions
+
+# Sentence-Transformers for embeddings (recommended)
+pip install sentence-transformers
+
+# OCR (if you want to parse scanned PDFs)
+pip install pytesseract pillow pdf2image
+# Also install Tesseract binary on system
+# Windows: install from: https://github.com/tesseract-ocr/tesseract
+# Linux (Ubuntu): sudo apt-get install tesseract-ocr
+
+
+#start ollama server
+
+ollama serve
+
+ollama run llama3:8b
+
+http://localhost:11434
+
+# stop the ollama server
+taskkill /IM ollama.exe /F
