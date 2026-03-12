@@ -1,0 +1,8 @@
+jobvenv/Scripts/activate
+
+ollama pull llama3:8b
+
+ollama run llama3:8b
+
+Mangesh9326
+Mangesh9326
