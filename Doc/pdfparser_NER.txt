@@ -1,0 +1,369 @@
+# parse_resume.py
+"""
+Resume parser with Transformer-based NER + Zero-shot job-role classification.
+
+Outputs JSON with:
+- file, resumeText, name, email, skills, education, experience, projects
+- ner_entities (transformer NER results)
+- predicted_role & role_candidates (zero-shot classification)
+"""
+
+import sys
+import os
+import re
+import json
+from typing import List, Dict
+
+# Text extraction libs
+try:
+    import fitz  # PyMuPDF
+except Exception:
+    fitz = None
+
+import docx
+
+# Try to use transformers; fallback to spaCy-only if unavailable
+try:
+    from transformers import pipeline, AutoTokenizer, AutoModelForTokenClassification
+    TRANSFORMERS_AVAILABLE = True
+except Exception:
+    TRANSFORMERS_AVAILABLE = False
+
+import spacy
+
+# Use large spaCy if installed else small
+SPACY_MODEL = "en_core_web_lg"
+try:
+    nlp = spacy.load(SPACY_MODEL)
+except Exception:
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except Exception:
+        nlp = None
+
+# -------------------------
+# Configuration
+# -------------------------
+COMMON_SKILLS = [
+    "python","java","javascript","react","node.js","node","express","django","flask",
+    "sql","mysql","postgresql","mongodb","aws","azure","gcp","docker","kubernetes",
+    "html","css","tensorflow","pytorch","git","linux","c++","c#","typescript","next.js",
+    "ruby","php","spark","hadoop","scala","rest","graphql","redis","kafka",
+    "nlp","computer vision","opencv","pandas","numpy","scikit-learn","xgboost","mlflow",
+    "airflow","kafka","hive","spark","bigquery","snowflake"
+]
+
+# Candidate job roles for zero-shot classifier (expand as needed)
+JOB_ROLE_CANDIDATES = [
+    "Machine Learning Engineer", "Data Scientist", "Data Engineer", "ML Researcher",
+    "NLP Engineer", "Computer Vision Engineer", "Backend Engineer", "Frontend Engineer",
+    "Full Stack Engineer", "DevOps Engineer", "MLOps Engineer", "Site Reliability Engineer",
+    "Product Manager", "QA Engineer", "Software Engineer", "Research Scientist",
+    "AI Engineer", "Robotics Engineer", "SRE", "Data Analyst"
+]
+
+# Transformer models (change if you want other models)
+NER_MODEL = "dslim/bert-base-NER"            # good off-the-shelf token-classification model
+ZS_MODEL = "facebook/bart-large-mnli"        # recommended zero-shot model
+
+
+# -------------------------
+# Text extraction helpers
+# -------------------------
+def extract_text_from_pdf(path: str) -> str:
+    if not fitz:
+        return ""
+    try:
+        doc = fitz.open(path)
+        pages = []
+        for p in doc:
+            txt = p.get_text("text")
+            if not txt.strip():
+                # fallback to blocks
+                try:
+                    txt = "\n".join(str(b) for b in p.get_text("blocks"))
+                except Exception:
+                    txt = ""
+            pages.append(txt)
+        return "\n".join(pages)
+    except Exception:
+        return ""
+
+
+def extract_text_from_docx(path: str) -> str:
+    try:
+        doc = docx.Document(path)
+        paragraphs = [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+        return "\n".join(paragraphs)
+    except Exception:
+        return ""
+
+
+def extract_text(path: str) -> str:
+    lower = path.lower()
+    if lower.endswith(".pdf"):
+        return extract_text_from_pdf(path)
+    if lower.endswith(".docx") or lower.endswith(".doc"):
+        return extract_text_from_docx(path)
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
+# -------------------------
+# Transformer pipelines init (lazy)
+# -------------------------
+_tf_ner = None
+_tf_zs = None
+
+def init_transformer_pipelines():
+    global _tf_ner, _tf_zs
+    if not TRANSFORMERS_AVAILABLE:
+        return
+
+    if _tf_ner is None:
+        try:
+            # Named entity recognition pipeline
+            _tf_ner = pipeline("ner", model=NER_MODEL, aggregation_strategy="simple")
+        except Exception:
+            # try default pipeline (no aggregation)
+            _tf_ner = pipeline("ner", model=NER_MODEL)
+
+    if _tf_zs is None:
+        try:
+            _tf_zs = pipeline("zero-shot-classification", model=ZS_MODEL)
+        except Exception:
+            _tf_zs = None
+
+
+# -------------------------
+# NER extraction (transformer preferred)
+# -------------------------
+def transformer_ner(text: str) -> List[Dict]:
+    """
+    Returns aggregated NER results like:
+    [ {"entity_group":"PER","word":"John Doe","score":0.99}, ... ]
+    """
+    if not TRANSFORMERS_AVAILABLE:
+        return []
+
+    init_transformer_pipelines()
+    if _tf_ner is None:
+        return []
+
+    try:
+        # limit text for transformer NER to reasonable length
+        snippet = text if len(text) < 6000 else text[:6000]
+        ents = _tf_ner(snippet)
+        # normalized keys ensure compatibility with spaCy style
+        normalized = []
+        for e in ents:
+            # some pipelines return 'entity_group' others 'entity'
+            group = e.get("entity_group") or e.get("entity") or e.get("label")
+            normalized.append({
+                "entity_group": group,
+                "word": e.get("word") or e.get("word"),
+                "score": float(e.get("score", 0))
+            })
+        return normalized
+    except Exception:
+        return []
+
+
+# -------------------------
+# Zero-shot job role classification
+# -------------------------
+def classify_role_zero_shot(text: str, candidate_labels: List[str] = JOB_ROLE_CANDIDATES):
+    """
+    Use zero-shot classification to score candidate roles against the resume text.
+    Returns: { predicted_role, scores: [{label, score}, ...] }
+    """
+    if not TRANSFORMERS_AVAILABLE:
+        return {"predicted_role": None, "role_candidates": []}
+
+    init_transformer_pipelines()
+    if _tf_zs is None:
+        return {"predicted_role": None, "role_candidates": []}
+
+    # Use top portion of resume (headline + summary + experience)
+    snippet = text if len(text) < 4000 else text[:4000]
+
+    try:
+        out = _tf_zs(snippet, candidate_labels, multi_label=False)
+        # out contains 'labels' and 'scores'
+        labels = out.get("labels", [])
+        scores = out.get("scores", [])
+        role_candidates = [{"label": l, "score": float(s)} for l, s in zip(labels, scores)]
+        predicted = role_candidates[0]["label"] if role_candidates else None
+        return {"predicted_role": predicted, "role_candidates": role_candidates}
+    except Exception:
+        return {"predicted_role": None, "role_candidates": []}
+
+
+# -------------------------
+# Other extractors (email/name/education/experience/projects/skills)
+# -------------------------
+def extract_email(text: str):
+    m = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    return m[0] if m else None
+
+
+def extract_name_spacy(text: str):
+    if not nlp:
+        return None
+    head = text[:2000]
+    doc = nlp(head)
+    # prefer PERSON ent with 2-3 tokens
+    for ent in doc.ents:
+        if ent.label_ == "PERSON" and 2 <= len(ent.text.split()) <= 4:
+            return ent.text.strip()
+    # fallback: first line with capitalized words
+    for ln in head.splitlines()[:8]:
+        ln = ln.strip()
+        if re.match(r"^[A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3}$", ln):
+            return ln
+    return None
+
+
+EDU_REGEX = re.compile(
+    r"(bachelor|master|ph\.?d|b\.?tech|m\.?tech|mba|b\.?e|m\.?e|high school|university|college|diploma|bs|ms)",
+    re.IGNORECASE,
+)
+
+def extract_education(text: str):
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    results = []
+    for ln in lines:
+        if EDU_REGEX.search(ln):
+            if 5 < len(ln) < 200:
+                results.append(ln)
+    return list(dict.fromkeys(results))
+
+
+EXP_HEADER_KEYWORDS = [
+    "experience", "work experience", "professional experience",
+    "employment history", "career history"
+]
+
+def extract_experience_blocks(text: str):
+    lines = [l for l in text.splitlines()]
+    blocks = []
+    for i, line in enumerate(lines):
+        if any(h in line.lower() for h in EXP_HEADER_KEYWORDS):
+            chunk = "\n".join(lines[i+1:i+40]).strip()
+            if len(chunk) > 20:
+                blocks.append(chunk)
+    # fallback: detect lines with dates or company patterns
+    date_range = re.compile(r"\b(19|20)\d{2}\b")
+    for ln in lines:
+        if "-" in ln or "–" in ln:
+            if date_range.search(ln) and len(ln) < 200:
+                blocks.append(ln.strip())
+    return list(dict.fromkeys(blocks))
+
+
+PROJECT_HEADERS = ["projects", "personal projects", "academic projects", "portfolio"]
+
+def extract_projects(text: str):
+    lines = text.splitlines()
+    proj = []
+    for i, ln in enumerate(lines):
+        if any(h in ln.lower() for h in PROJECT_HEADERS):
+            for sub in lines[i+1:i+30]:
+                if len(sub.strip()) > 5:
+                    proj.append(sub.strip())
+            break
+    # bullet fallback
+    for ln in lines:
+        if re.match(r"^[-•]\s+[A-Za-z].{10,}", ln):
+            proj.append(ln.strip())
+    return list(dict.fromkeys(proj))
+
+
+def extract_skills(text: str):
+    text_lower = text.lower()
+    found = set()
+    # match from COMMON_SKILLS
+    for s in COMMON_SKILLS:
+        # treat punctuation-insensitive
+        token = re.sub(r"[^\w+#]", "", s.lower())
+        if re.search(r"\b" + re.escape(token) + r"\b", re.sub(r"[^\w+#\s]", " ", text_lower)):
+            found.add(s)
+    # spaCy noun chunks heuristic for multi-word skills
+    if nlp:
+        doc = nlp(text)
+        for chunk in doc.noun_chunks:
+            chunk_text = chunk.text.strip()
+            if 2 <= len(chunk_text) <= 30:
+                # include if contains certain keywords or known tech words
+                if any(k in chunk_text.lower() for k in ["machine", "learning", "deep", "nlp", "data", "analysis", "engineer", "framework", "library"]):
+                    found.add(chunk_text)
+    # frequency-based tokens
+    tokens = re.findall(r"[A-Za-z0-9\+\#\.\-]{2,30}", text)
+    for t in set(tokens):
+        tl = t.lower()
+        if tl in [s.lower() for s in COMMON_SKILLS]:
+            found.add(t)
+    return sorted(found)
+
+
+# -------------------------
+# Main pipeline
+# -------------------------
+def parse_resume(path: str):
+    text = extract_text(path)
+    if not text or len(text.strip()) < 20:
+        return {"error": "no_text_extracted"}
+
+    # transform NER & classification
+    ner_entities = []
+    role_info = {"predicted_role": None, "role_candidates": []}
+
+    if TRANSFORMERS_AVAILABLE:
+        ner_entities = transformer_ner(text)
+        role_info = classify_role_zero_shot(text)
+    else:
+        # fallback: spaCy NER
+        if nlp:
+            doc = nlp(text[:4000])
+            ner_entities = [{"entity_group": ent.label_, "word": ent.text, "score": 1.0} for ent in doc.ents]
+        role_info = {"predicted_role": None, "role_candidates": []}
+
+    # name: prefer transformer NER PERSON if present, else spaCy heuristic
+    name = None
+    for e in ner_entities:
+        if str(e.get("entity_group", "")).upper() in ("PER", "PERSON", "PERSON_NAME"):
+            name = e.get("word")
+            break
+    if not name:
+        name = extract_name_spacy(text) if nlp else None
+
+    out = {
+        "file": os.path.basename(path),
+        "resumeText": text,
+        "name": name,
+        "email": extract_email(text),
+        "skills": extract_skills(text),
+        "education": extract_education(text),
+        "experience": extract_experience_blocks(text),
+        "projects": extract_projects(text),
+        "ner_entities": ner_entities,
+        "predicted_role": role_info.get("predicted_role"),
+        "role_candidates": role_info.get("role_candidates"),
+    }
+    return out
+
+
+# -------------------------
+# CLI
+# -------------------------
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(json.dumps({"error": "no_file_path"}))
+        sys.exit(1)
+    path = sys.argv[1]
+    result = parse_resume(path)
+    print(json.dumps(result, ensure_ascii=False, indent=2))

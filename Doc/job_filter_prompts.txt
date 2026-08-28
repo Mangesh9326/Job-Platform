@@ -1,0 +1,19 @@
+1. Multi-Location & Role Combinations
+Show me Frontend or Fullstack developer jobs in Mumbai, Pune, or Bangalore.
+
+I need Python or Java backend roles in Delhi and Noida.
+
+Are there any Flutter or React Native opportunities in Remote or Hyderabad?
+
+2. Salary & Employment Type Constraints
+"Find me full-time remote jobs paying above 20 LPA."
+
+"Show part-time or contract roles for Designers with salary at least 10 LPA."
+
+"Looking for internships in Bangalore offering more than 5 LPA."
+
+3. The "All-in-One" Stress Test
+"Senior Backend or DevOps engineers in Bangalore or Remote paying > 25 LPA for full-time employment."
+
+4. Edge Cases (Reset & Simple)
+"Clear filters and show all jobs."

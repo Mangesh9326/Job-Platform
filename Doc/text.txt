@@ -1,0 +1,76 @@
+python -m venv jobvenv
+jobvenv\Scripts\activate
+pip install --upgrade pip setuptools wheel
+pip install python-docx rapidfuzz PyMuPDF spacy
+python -m spacy download en_core_web_sm
+# optional (better): python -m spacy download en_core_web_lg
+
+pip install huggingface_hub[hf_xet] or pip install hf_xet
+
+# Transformers & NER (optional but recommended)
+pip install transformers[torch]   # big, installs PyTorch (choose torch with CUDA for GPU)
+# OR install CPU-only torch following official instructions
+
+# Sentence-Transformers for embeddings (recommended)
+pip install sentence-transformers
+
+# OCR (if you want to parse scanned PDFs)
+pip install pytesseract pillow pdf2image
+# Also install Tesseract binary on system
+# Windows: install from: https://github.com/tesseract-ocr/tesseract
+# Linux (Ubuntu): sudo apt-get install tesseract-ocr
+
+
+#OCR
+pip install pytesseract pdf2image pillow
+
+
+--------------------commands-----------------------------------
+
+1. Multi-Location & Role Combinations
+Show me Frontend or Fullstack developer jobs in Mumbai, Pune, or Bangalore.
+
+I need Python or Java backend roles in Delhi and Noida.
+
+Are there any Flutter or React Native opportunities in Remote or Hyderabad?
+
+2. Salary & Employment Type Constraints
+Find me full-time remote jobs paying above 20 LPA.
+
+Show part-time or contract roles for Designers with salary at least 10 LPA.
+
+Looking for internships in Bangalore offering more than 5 LPA.
+
+3. The "All-in-One" Stress Test
+Senior Backend or DevOps engineers in Bangalore or Remote paying > 25 LPA for full-time employment.
+
+4. Edge Cases (Reset & Simple)
+Clear filters and show all jobs.
+
+Reset everything.
+
+
+--------------------------------------------------------------------
+
+# stop the ollama server
+taskkill /IM ollama.exe /F
+
+RUN:
+
+#Server
+jobvenv\Scripts\activate
+node server.js
+
+#Client
+npm run dev
+
+#Ollama
+# Windows (PowerShell)
+$env:OLLAMA_ORIGINS="*"; ollama serve
+
+# Mac/Linux
+OLLAMA_ORIGINS="*" ollama serve
+
+ollama serve
+ollama run llama3:8b
+http://localhost:11434
