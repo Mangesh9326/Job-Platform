@@ -76,7 +76,14 @@ body {
   100% { top: 100%; opacity: 0; }
 }
 
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
 
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 9999px;
+}
 /* @media (prefers-color-scheme: dark) {
   :root {
     color: #ffffff;

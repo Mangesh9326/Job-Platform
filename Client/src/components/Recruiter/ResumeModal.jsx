@@ -27,7 +27,7 @@ const ResumeModal = ({ candidate, onClose }) => {
     <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4 sm:p-6">
       {/* Modal Container */}
       <div 
-        className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col relative animate-in fade-in zoom-in-95 duration-200"
+        className="custom-scrollbar top-7 bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col relative animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()} // Prevent clicking inside from closing it
       >
         {/* Close Button */}
